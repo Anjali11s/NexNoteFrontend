@@ -39,65 +39,57 @@ const HomePage = () => {
   }, []);
 
   // Filter notes based on search
-  const filteredNotes = notes.filter(note => 
+  const filteredNotes = notes.filter(note =>
     note.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     note.content?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   // Sort notes
-const getSortedNotes = () => {
-  const sorted = [...filteredNotes];
-  
-  // First, separate pinned and unpinned notes
-  const pinnedNotes = sorted.filter(note => note.isPinned === true);
-  const unpinnedNotes = sorted.filter(note => note.isPinned !== true);
-  
-  // Sort pinned notes by pin date (most recently pinned first)
-  // Note: You'll need to add a pinnedAt field to track pin order
-  const sortedPinned = pinnedNotes.sort((a, b) => {
-    // If you have pinnedAt field, use that
-    if (a.pinnedAt && b.pinnedAt) {
-      return new Date(b.pinnedAt) - new Date(a.pinnedAt);
+  const getSortedNotes = () => {
+    const sorted = [...filteredNotes];
+    const pinnedNotes = sorted.filter(note => note.isPinned === true);
+    const unpinnedNotes = sorted.filter(note => note.isPinned !== true);
+
+    const sortedPinned = pinnedNotes.sort((a, b) => {
+      if (a.pinnedAt && b.pinnedAt) {
+        return new Date(b.pinnedAt) - new Date(a.pinnedAt);
+      }
+      return new Date(b.updatedAt) - new Date(a.updatedAt);
+    });
+
+    let sortedUnpinned = [...unpinnedNotes];
+    switch (sortBy) {
+      case "newest":
+        sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+        break;
+      case "oldest":
+        sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+        break;
+      case "az":
+        sortedUnpinned = sortedUnpinned.sort((a, b) => a.title?.localeCompare(b.title));
+        break;
+      case "za":
+        sortedUnpinned = sortedUnpinned.sort((a, b) => b.title?.localeCompare(a.title));
+        break;
+      default:
+        sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     }
-    // Otherwise sort by updatedAt (most recently updated/pinned first)
-    return new Date(b.updatedAt) - new Date(a.updatedAt);
-  });
-  
-  // Sort unpinned notes based on selected sort option
-  let sortedUnpinned = [...unpinnedNotes];
-  switch (sortBy) {
-    case "newest":
-      sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-      break;
-    case "oldest":
-      sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
-      break;
-    case "az":
-      sortedUnpinned = sortedUnpinned.sort((a, b) => a.title?.localeCompare(b.title));
-      break;
-    case "za":
-      sortedUnpinned = sortedUnpinned.sort((a, b) => b.title?.localeCompare(a.title));
-      break;
-    default:
-      sortedUnpinned = sortedUnpinned.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-  }
-  
-  // Combine pinned notes at top, then unpinned
-  return [...sortedPinned, ...sortedUnpinned];
-};
+
+    return [...sortedPinned, ...sortedUnpinned];
+  };
 
   const sortedNotes = getSortedNotes();
 
   const handleExport = () => {
     const dataStr = JSON.stringify(notes, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
     const exportFileDefaultName = `nexnote-backup-${new Date().toISOString().slice(0,19)}.json`;
-    
+
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
     linkElement.click();
-    
+
     toast.success("Notes exported successfully!");
   };
 
@@ -107,7 +99,8 @@ const getSortedNotes = () => {
 
       {isRateLimited && <RateLimitedUI />}
 
-      <div className="max-w-7xl mx-auto p-4 md:p-6 mt-4">
+      {/* ✅ Updated container for responsiveness */}
+      <div className="w-full max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
         {loading && (
           <div className="flex flex-col items-center justify-center py-20">
             <div className="relative">
@@ -120,7 +113,7 @@ const getSortedNotes = () => {
         {!loading && notes.length > 0 && !isRateLimited && (
           <>
             <StatsCard notes={notes} />
-            
+
             <div className="flex flex-col sm:flex-row gap-4 mb-8">
               <SearchBar onSearch={setSearchQuery} />
               <SortDropdown onSort={setSortBy} currentSort={sortBy} />
@@ -150,7 +143,9 @@ const getSortedNotes = () => {
                     <span className="text-sm font-semibold">Stay organized</span>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+                {/* ✅ Updated grid for mobile responsiveness */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                   {sortedNotes.map((note) => (
                     <NoteCard key={note._id} note={note} setNotes={setNotes} />
                   ))}
