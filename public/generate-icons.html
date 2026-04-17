@@ -1,0 +1,45 @@
+<!-- public/generate-icons.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate NexNote Icons</title>
+</head>
+<body>
+    <h2>Generating Icons...</h2>
+    <canvas id="canvas192" width="192" height="192"></canvas>
+    <canvas id="canvas512" width="512" height="512"></canvas>
+    <canvas id="canvas180" width="180" height="180"></canvas>
+    <script>
+        function drawIcon(ctx, size, color1, color2) {
+            // Gradient background
+            const gradient = ctx.createLinearGradient(0, 0, size, size);
+            gradient.addColorStop(0, color1);
+            gradient.addColorStop(1, color2);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, size, size);
+            
+            // Draw "N" letter instead of star (simpler)
+            ctx.fillStyle = 'white';
+            ctx.font = `bold ${size * 0.5}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('N', size/2, size/2);
+            
+            // Download
+            const link = document.createElement('a');
+            link.download = `icon-${size}.png`;
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+        
+        // Generate all icons
+        drawIcon(document.getElementById('canvas192').getContext('2d'), 192, '#f59e0b', '#ea580c');
+        drawIcon(document.getElementById('canvas512').getContext('2d'), 512, '#f59e0b', '#ea580c');
+        drawIcon(document.getElementById('canvas180').getContext('2d'), 180, '#f59e0b', '#ea580c');
+        
+        setTimeout(() => {
+            document.body.innerHTML = '<h2>✅ Icons Generated Successfully!</h2><p>Check your Downloads folder. Move these files to your "public" folder:</p><ul><li><strong>icon-192.png</strong> (from downloads)</li><li><strong>icon-512.png</strong> (from downloads)</li><li><strong>apple-touch-icon.png</strong> (rename icon-180.png from downloads)</li></ul><button onclick="window.location.reload()">Generate Again</button>';
+        }, 1000);
+    </script>
+</body>
+</html>
