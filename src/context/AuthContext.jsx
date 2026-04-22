@@ -16,7 +16,19 @@ export const AuthProvider = ({ children }) => {
     const token = localStorage.getItem("token");
     if (token) {
       api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
-      fetchUser();
+      
+      // CRITICAL FIX: Don't try to verify user if offline
+      if (navigator.onLine) {
+        fetchUser();
+      } else {
+        // If offline, assume token is still valid
+        setLoading(false);
+        // Try to get cached user data
+        const cachedUser = localStorage.getItem("cachedUser");
+        if (cachedUser) {
+          setUser(JSON.parse(cachedUser));
+        }
+      }
     } else {
       setLoading(false);
     }
@@ -26,10 +38,16 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.get("/auth/me");
       setUser(res.data);
+      // Cache user data for offline use
+      localStorage.setItem("cachedUser", JSON.stringify(res.data));
     } catch (error) {
       console.error("Failed to fetch user:", error);
-      localStorage.removeItem("token");
-      delete api.defaults.headers.common["Authorization"];
+      // Only logout if it's not an offline error
+      if (!error.isOffline && navigator.onLine) {
+        localStorage.removeItem("token");
+        delete api.defaults.headers.common["Authorization"];
+        localStorage.removeItem("cachedUser");
+      }
     } finally {
       setLoading(false);
     }
@@ -39,6 +57,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.post("/auth/login", { email, password });
       localStorage.setItem("token", res.data.token);
+      localStorage.setItem("cachedUser", JSON.stringify(res.data));
       api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
       setUser(res.data);
       
@@ -56,6 +75,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.post("/auth/register", { name, email, password });
       localStorage.setItem("token", res.data.token);
+      localStorage.setItem("cachedUser", JSON.stringify(res.data));
       api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
       setUser(res.data);
       
@@ -76,15 +96,16 @@ export const AuthProvider = ({ children }) => {
       
       // Then clear auth data
       localStorage.removeItem("token");
+      localStorage.removeItem("cachedUser");
       delete api.defaults.headers.common["Authorization"];
       setUser(null);
       
-      // Optional: Show success message
       toast.success("Logged out successfully");
     } catch (error) {
       console.error("Logout error:", error);
       // Still clear auth data even if offline clear fails
       localStorage.removeItem("token");
+      localStorage.removeItem("cachedUser");
       delete api.defaults.headers.common["Authorization"];
       setUser(null);
     }

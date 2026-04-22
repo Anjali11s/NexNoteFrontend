@@ -1,10 +1,12 @@
 // frontend/src/components/NoteCard.jsx
+// The issue was using useState instead of useEffect for event listeners
+
 import { PenSquareIcon, Trash2Icon, PinIcon } from "lucide-react";
 import { useNavigate } from "react-router"; 
 import { formatDate } from "../lib/utils";
 import api from "../lib/axios";
 import toast from "react-hot-toast";
-import { useState } from "react";
+import { useState, useEffect } from "react"; // CHANGE: import useEffect
 import { queueAction, cacheNotes, getCachedNotes } from "../lib/offlineStorage";
 
 const NoteCard = ({ note, setNotes }) => {
@@ -12,8 +14,8 @@ const NoteCard = ({ note, setNotes }) => {
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const navigate = useNavigate();
 
-  // Listen for online status
-  useState(() => {
+  // FIX: Use useEffect instead of useState for event listeners
+  useEffect(() => {
     const handleOnline = () => setIsOffline(false);
     const handleOffline = () => setIsOffline(true);
     
@@ -24,7 +26,7 @@ const NoteCard = ({ note, setNotes }) => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, []); // Empty dependency array
 
   const handleDelete = async (e, id) => {
     e.preventDefault();
@@ -32,17 +34,14 @@ const NoteCard = ({ note, setNotes }) => {
 
     if (!window.confirm("Are you sure you want to delete this note?")) return;
 
-    // OFFLINE MODE: Queue deletion
     if (isOffline) {
       await queueAction({
         type: 'DELETE_NOTE',
         noteId: id
       });
       
-      // Remove from local state immediately
       setNotes((prev) => prev.filter((note) => note._id !== id));
       
-      // Also remove from cache
       const cached = await getCachedNotes();
       const updatedCache = cached.filter(n => n._id !== id);
       await cacheNotes(updatedCache);
@@ -53,7 +52,6 @@ const NoteCard = ({ note, setNotes }) => {
       return;
     }
 
-    // ONLINE MODE
     try {
       await api.delete(`/notes/${id}`);
       setNotes((prev) => prev.filter((note) => note._id !== id));
@@ -71,7 +69,6 @@ const NoteCard = ({ note, setNotes }) => {
     const newPinState = !isPinned;
     setIsPinned(newPinState);
     
-    // OFFLINE MODE: Queue pin action
     if (isOffline) {
       await queueAction({
         type: 'PIN_NOTE',
@@ -79,7 +76,6 @@ const NoteCard = ({ note, setNotes }) => {
         isPinned: newPinState
       });
       
-      // Update local state
       setNotes((prev) => {
         const updated = prev.map(n => 
           n._id === note._id ? { ...n, isPinned: newPinState } : n
@@ -93,7 +89,6 @@ const NoteCard = ({ note, setNotes }) => {
       return;
     }
     
-    // ONLINE MODE
     try {
       await api.patch(`/notes/${note._id}/pin`, { isPinned: newPinState });
       toast.success(newPinState ? "Note pinned!" : "Note unpinned");
@@ -129,7 +124,6 @@ const NoteCard = ({ note, setNotes }) => {
     <div className="group block bg-white dark:bg-stone-800 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200/50 dark:border-stone-700 overflow-hidden hover:-translate-y-1 cursor-pointer">
       <div className="h-2 bg-gradient-to-r from-amber-500 to-orange-500"></div>
       
-      {/* Offline indicator badge */}
       {note.isOffline && (
         <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full">
           Pending Sync

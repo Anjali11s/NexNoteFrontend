@@ -1,5 +1,5 @@
 // frontend/src/pages/HomePage.jsx
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react"; // Add useRef
 import Navbar from "../components/Navbar";
 import RateLimitedUI from "../components/RateLimitedUI";
 import SearchBar from "../components/SearchBar";
@@ -23,6 +23,9 @@ const HomePage = () => {
   const [lastSync, setLastSync] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  
+  // CRITICAL FIX: Track if initial sync was done
+  const initialSyncDone = useRef(false);
 
   // Initialize sync listener once when app loads
   useEffect(() => {
@@ -50,7 +53,7 @@ const HomePage = () => {
       const cached = await getCachedNotes();
       if (cached.length > 0) {
         setNotes(cached);
-        setLoading(false); // Show UI immediately with cached data
+        setLoading(false);
       }
     }
     
@@ -64,7 +67,7 @@ const HomePage = () => {
     try {
       const res = await api.get("/notes");
       setNotes(res.data);
-      await cacheNotes(res.data); // Save to local cache for next offline use
+      await cacheNotes(res.data);
       setIsRateLimited(false);
       
       const syncTime = await getLastSync();
@@ -86,10 +89,21 @@ const HomePage = () => {
   useEffect(() => {
     fetchNotes();
     
+    // CRITICAL FIX: Only sync once on initial load
+    const doInitialSync = async () => {
+      if (!initialSyncDone.current && navigator.onLine) {
+        initialSyncDone.current = true;
+        await syncPendingActions();
+        await fetchNotes(true);
+      }
+    };
+    
+    doInitialSync();
+    
     // Listen for online/offline events
     const handleOnline = () => {
       setIsOffline(false);
-      fetchNotes(true); // Refresh when back online
+      fetchNotes(true);
     };
     
     const handleOffline = () => {
@@ -118,6 +132,11 @@ const HomePage = () => {
       return;
     }
     
+    if (isSyncing) {
+      toast.error("Sync already in progress");
+      return;
+    }
+    
     setIsSyncing(true);
     await syncPendingActions();
     await fetchNotes(true);
@@ -125,7 +144,6 @@ const HomePage = () => {
     
     const count = await getPendingCount();
     setPendingCount(count);
-    toast.success("Sync completed!");
   };
 
   // Filter and sort notes (same as before)
@@ -211,7 +229,7 @@ const HomePage = () => {
             </div>
             <button
               onClick={handleManualSync}
-              disabled={isSyncing}
+              disabled={isSyncing || !navigator.onLine}
               className="flex items-center gap-1 hover:text-amber-600 transition-colors"
             >
               <CloudSyncIcon className={`size-3 ${isSyncing ? 'animate-spin' : ''}`} />
