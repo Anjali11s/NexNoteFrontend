@@ -21,7 +21,7 @@ const getBaseUrl = () => {
 
 const BASE_URL = getBaseUrl();
 
-console.log('API Base URL:', BASE_URL); // This helps debug
+console.log('API Base URL:', BASE_URL); // for debug
 
 const api = axios.create({
   baseURL: BASE_URL,
@@ -36,5 +36,18 @@ api.interceptors.request.use((config) => {
   }
   return config;
 });
+
+// Add response interceptor for offline detection
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Detect if browser is offline
+    if (!navigator.onLine) {
+      error.isOffline = true;
+      error.message = "You are offline. Changes will sync when connection returns.";
+    }
+    return Promise.reject(error);
+  }
+);
 
 export default api;

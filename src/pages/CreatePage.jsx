@@ -1,11 +1,12 @@
-// src/pages/CreatePage.jsx
-import { ArrowLeftIcon } from "lucide-react";
+// frontend/src/pages/CreatePage.jsx
+import { ArrowLeftIcon, WifiOffIcon } from "lucide-react";
 import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import { Link, useNavigate } from "react-router";
 import Confetti from "react-confetti";
 import api from "../lib/axios";
 import TagInput from "../components/TagInput";
+import { queueAction, getCachedNotes, cacheNotes } from "../lib/offlineStorage";
 
 const CreatePage = () => {
   const [title, setTitle] = useState("");
@@ -15,6 +16,7 @@ const CreatePage = () => {
   const [showConfetti, setShowConfetti] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const navigate = useNavigate();
 
@@ -25,9 +27,22 @@ const CreatePage = () => {
     setCharCount(content.length);
   }, [content]);
 
-  // Auto-save draft
+  // Listen for online/offline
   useEffect(() => {
-    // Load draft on mount
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  // Auto-save draft (same as before)
+  useEffect(() => {
     const draft = localStorage.getItem("note_draft");
     if (draft && !title && !content && !tags.length) {
       const shouldLoad = window.confirm("You have a saved draft. Load it?");
@@ -40,7 +55,6 @@ const CreatePage = () => {
     }
   }, []);
 
-  // Save draft
   useEffect(() => {
     if (title || content || tags.length) {
       const timer = setTimeout(() => {
@@ -59,16 +73,50 @@ const CreatePage = () => {
     }
 
     setLoading(true);
-    try {
-      await api.post("/notes", { title, content, tags });
+    
+    // OFFLINE MODE: Save locally and queue for later sync
+    if (isOffline) {
+      // Create temporary note with local ID
+      const tempNote = {
+        _id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        title,
+        content,
+        tags,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isPinned: false,
+        isOffline: true // Mark as offline note
+      };
+      
+      // Queue for sync when online
+      await queueAction({
+        type: 'CREATE_NOTE',
+        data: { title, content, tags }
+      });
+      
+      // Add to local cache immediately
+      const cachedNotes = await getCachedNotes();
+      cachedNotes.unshift(tempNote);
+      await cacheNotes(cachedNotes);
       
       // Clear draft
       localStorage.removeItem("note_draft");
       
-      // Show confetti
+      toast.success("Note saved offline! Will sync when online.", {
+        icon: '📱',
+        duration: 4000
+      });
+      
+      navigate("/");
+      return;
+    }
+    
+    // ONLINE MODE: Normal flow
+    try {
+      await api.post("/notes", { title, content, tags });
+      localStorage.removeItem("note_draft");
       setShowConfetti(true);
       setTimeout(() => setShowConfetti(false), 3000);
-      
       toast.success("Note created successfully!");
       navigate("/");
     } catch (error) {
@@ -78,6 +126,10 @@ const CreatePage = () => {
           duration: 4000,
           icon: "💀",
         });
+      } else if (error.isOffline) {
+        // Fallback to offline mode if request fails due to network
+        setIsOffline(true);
+        handleSubmit(e); // Retry with offline logic
       } else {
         toast.error("Failed to create note");
       }
@@ -97,7 +149,7 @@ const CreatePage = () => {
     
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [title, content, tags]);
+  }, [title, content, tags, isOffline]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-stone-100 dark:from-stone-900 dark:via-stone-800 dark:to-stone-900 transition-colors duration-300">
@@ -115,10 +167,20 @@ const CreatePage = () => {
               <h2 className="text-2xl font-bold text-white">
                 Create New Note
               </h2>
-              <p className="text-amber-100 text-sm mt-1">Capture your thoughts</p>
+              <p className="text-amber-100 text-sm mt-1">
+                {isOffline ? "Offline Mode - Will sync when online" : "Capture your thoughts"}
+              </p>
             </div>
             
             <div className="p-6">
+              {/* Offline Warning */}
+              {isOffline && (
+                <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+                  <WifiOffIcon className="size-4" />
+                  <span className="text-sm">Offline mode - Note will be saved locally and sync when online</span>
+                </div>
+              )}
+              
               <form onSubmit={handleSubmit}>
                 <div className="mb-5">
                   <label className="block text-sm font-semibold text-stone-700 dark:text-stone-300 mb-2">
@@ -169,7 +231,7 @@ const CreatePage = () => {
                     className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-medium shadow-lg hover:shadow-xl transition-all disabled:opacity-50"
                     disabled={loading}
                   >
-                    {loading ? "Creating..." : "✨ Create Note"}
+                    {loading ? "Creating..." : (isOffline ? "📱 Save Offline" : "✨ Create Note")}
                   </button>
                 </div>
                 

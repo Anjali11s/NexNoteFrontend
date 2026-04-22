@@ -1,4 +1,4 @@
-// src/components/Navbar.jsx
+// frontend/src/components/Navbar.jsx
 import React from 'react'
 import { Link, useNavigate } from 'react-router'
 import { PlusIcon, SparklesIcon, DownloadIcon, LogOutIcon } from 'lucide-react'
@@ -10,10 +10,9 @@ const Navbar = ({ onExport }) => {
     const { user, logout } = useAuth();
     const navigate = useNavigate();
 
-    const handleLogout = () => {
-      logout();
+    const handleLogout = async () => {
+      await logout();  // Wait for offline data to clear
       navigate("/login");
-      toast.success("Logged out successfully");
     };
     
     return (

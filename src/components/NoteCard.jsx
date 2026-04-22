@@ -1,14 +1,30 @@
-// src/components/NoteCard.jsx
-import { PenSquareIcon, Trash2Icon, PinIcon, EyeIcon } from "lucide-react";
-import { Link, useNavigate } from "react-router"; 
+// frontend/src/components/NoteCard.jsx
+import { PenSquareIcon, Trash2Icon, PinIcon } from "lucide-react";
+import { useNavigate } from "react-router"; 
 import { formatDate } from "../lib/utils";
 import api from "../lib/axios";
 import toast from "react-hot-toast";
 import { useState } from "react";
+import { queueAction, cacheNotes, getCachedNotes } from "../lib/offlineStorage";
 
 const NoteCard = ({ note, setNotes }) => {
   const [isPinned, setIsPinned] = useState(note.isPinned || false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const navigate = useNavigate();
+
+  // Listen for online status
+  useState(() => {
+    const handleOnline = () => setIsOffline(false);
+    const handleOffline = () => setIsOffline(true);
+    
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   const handleDelete = async (e, id) => {
     e.preventDefault();
@@ -16,6 +32,28 @@ const NoteCard = ({ note, setNotes }) => {
 
     if (!window.confirm("Are you sure you want to delete this note?")) return;
 
+    // OFFLINE MODE: Queue deletion
+    if (isOffline) {
+      await queueAction({
+        type: 'DELETE_NOTE',
+        noteId: id
+      });
+      
+      // Remove from local state immediately
+      setNotes((prev) => prev.filter((note) => note._id !== id));
+      
+      // Also remove from cache
+      const cached = await getCachedNotes();
+      const updatedCache = cached.filter(n => n._id !== id);
+      await cacheNotes(updatedCache);
+      
+      toast.success("Note will be deleted when back online", {
+        icon: '📱'
+      });
+      return;
+    }
+
+    // ONLINE MODE
     try {
       await api.delete(`/notes/${id}`);
       setNotes((prev) => prev.filter((note) => note._id !== id));
@@ -33,8 +71,30 @@ const NoteCard = ({ note, setNotes }) => {
     const newPinState = !isPinned;
     setIsPinned(newPinState);
     
+    // OFFLINE MODE: Queue pin action
+    if (isOffline) {
+      await queueAction({
+        type: 'PIN_NOTE',
+        noteId: note._id,
+        isPinned: newPinState
+      });
+      
+      // Update local state
+      setNotes((prev) => {
+        const updated = prev.map(n => 
+          n._id === note._id ? { ...n, isPinned: newPinState } : n
+        );
+        return updated.sort((a, b) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0));
+      });
+      
+      toast.success(newPinState ? "Pinned! (Will sync online)" : "Unpinned! (Will sync online)", {
+        icon: '📱'
+      });
+      return;
+    }
+    
+    // ONLINE MODE
     try {
-      // Make sure this endpoint exists on your backend
       await api.patch(`/notes/${note._id}/pin`, { isPinned: newPinState });
       toast.success(newPinState ? "Note pinned!" : "Note unpinned");
       
@@ -69,7 +129,13 @@ const NoteCard = ({ note, setNotes }) => {
     <div className="group block bg-white dark:bg-stone-800 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200/50 dark:border-stone-700 overflow-hidden hover:-translate-y-1 cursor-pointer">
       <div className="h-2 bg-gradient-to-r from-amber-500 to-orange-500"></div>
       
-      {/* Clickable area for viewing */}
+      {/* Offline indicator badge */}
+      {note.isOffline && (
+        <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full">
+          Pending Sync
+        </div>
+      )}
+      
       <div onClick={handleView} className="p-5">
         <div className="flex items-start justify-between mb-3">
           <h3 className="text-xl font-bold text-stone-800 dark:text-stone-200 group-hover:text-amber-700 dark:group-hover:text-amber-400 transition-colors line-clamp-1 flex-1">
@@ -87,7 +153,7 @@ const NoteCard = ({ note, setNotes }) => {
         </div>
         
         <p className="text-stone-600 dark:text-stone-400 line-clamp-3 mb-4 leading-relaxed">
-          {note.content?.replace(/<[^>]*>/g, '') || note.content} {/* Strip HTML tags if any */}
+          {note.content?.replace(/<[^>]*>/g, '') || note.content}
         </p>
         
         {note.tags && note.tags.length > 0 && (
@@ -110,7 +176,6 @@ const NoteCard = ({ note, setNotes }) => {
             {formatDate(new Date(note.createdAt))}
           </span>
           <div className="flex items-center gap-2">
-            {/* Edit Button */}
             <button
               onClick={handleEdit}
               className="p-1.5 rounded-lg text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all"
@@ -118,7 +183,6 @@ const NoteCard = ({ note, setNotes }) => {
             >
               <PenSquareIcon className="size-4" />
             </button>
-            {/* Delete Button */}
             <button
               className="p-1.5 rounded-lg text-red-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all"
               onClick={(e) => handleDelete(e, note._id)}

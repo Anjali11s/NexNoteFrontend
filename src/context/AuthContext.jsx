@@ -1,5 +1,8 @@
+// frontend/src/context/AuthContext.jsx
 import React, { createContext, useState, useContext, useEffect } from "react";
 import api from "../lib/axios";
+import { clearOfflineData } from "../lib/offlineStorage";
+import toast from "react-hot-toast";
 
 const AuthContext = createContext();
 
@@ -24,6 +27,7 @@ export const AuthProvider = ({ children }) => {
       const res = await api.get("/auth/me");
       setUser(res.data);
     } catch (error) {
+      console.error("Failed to fetch user:", error);
       localStorage.removeItem("token");
       delete api.defaults.headers.common["Authorization"];
     } finally {
@@ -32,25 +36,58 @@ export const AuthProvider = ({ children }) => {
   };
 
   const login = async (email, password) => {
-    const res = await api.post("/auth/login", { email, password });
-    localStorage.setItem("token", res.data.token);
-    api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
-    setUser(res.data);
-    return res.data;
+    try {
+      const res = await api.post("/auth/login", { email, password });
+      localStorage.setItem("token", res.data.token);
+      api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
+      setUser(res.data);
+      
+      // Clear any previous user's offline data when new user logs in
+      await clearOfflineData();
+      
+      return res.data;
+    } catch (error) {
+      console.error("Login error:", error);
+      throw error;
+    }
   };
 
   const register = async (name, email, password) => {
-    const res = await api.post("/auth/register", { name, email, password });
-    localStorage.setItem("token", res.data.token);
-    api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
-    setUser(res.data);
-    return res.data;
+    try {
+      const res = await api.post("/auth/register", { name, email, password });
+      localStorage.setItem("token", res.data.token);
+      api.defaults.headers.common["Authorization"] = `Bearer ${res.data.token}`;
+      setUser(res.data);
+      
+      // Clear any existing offline data for new user
+      await clearOfflineData();
+      
+      return res.data;
+    } catch (error) {
+      console.error("Registration error:", error);
+      throw error;
+    }
   };
 
-  const logout = () => {
-    localStorage.removeItem("token");
-    delete api.defaults.headers.common["Authorization"];
-    setUser(null);
+  const logout = async () => {
+    try {
+      // Clear all offline data first (important for security)
+      await clearOfflineData();
+      
+      // Then clear auth data
+      localStorage.removeItem("token");
+      delete api.defaults.headers.common["Authorization"];
+      setUser(null);
+      
+      // Optional: Show success message
+      toast.success("Logged out successfully");
+    } catch (error) {
+      console.error("Logout error:", error);
+      // Still clear auth data even if offline clear fails
+      localStorage.removeItem("token");
+      delete api.defaults.headers.common["Authorization"];
+      setUser(null);
+    }
   };
 
   return (
