@@ -1,4 +1,3 @@
-// src/components/ThemeToggle.jsx
 import { MoonIcon, SunIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 

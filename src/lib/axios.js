@@ -1,4 +1,3 @@
-// src/lib/axios.js
 import axios from "axios";
 
 // Get the correct API URL based on environment
