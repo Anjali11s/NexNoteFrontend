@@ -1,4 +1,3 @@
-// src/components/PWAPrompt.jsx
 import { useEffect, useState } from 'react'
 import { DownloadIcon, XIcon } from 'lucide-react'
 
@@ -35,24 +34,24 @@ const PWAPrompt = () => {
     <div className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:w-96 z-50 animate-in slide-in-from-bottom-5 duration-300">
       <div className="bg-white dark:bg-stone-800 rounded-xl shadow-2xl border border-amber-200 dark:border-stone-700 p-4">
         <div className="flex items-start gap-3">
-          <div className="p-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500">
+          <div className="p-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 shadow-md">
             <DownloadIcon className="size-5 text-white" />
           </div>
           <div className="flex-1">
             <h3 className="font-bold text-stone-800 dark:text-white">Install NexNote</h3>
             <p className="text-sm text-stone-600 dark:text-stone-400 mt-1">
-              Install our app for a better experience with offline access
+              Install our app for a better experience with offline access and faster loading
             </p>
             <div className="flex gap-2 mt-3">
               <button
                 onClick={handleInstall}
-                className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 transition-colors"
+                className="px-3 py-1.5 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg text-sm font-medium hover:from-amber-700 hover:to-orange-700 transition-all shadow-md hover:shadow-lg"
               >
                 Install
               </button>
               <button
                 onClick={() => setShowPrompt(false)}
-                className="px-3 py-1.5 border border-stone-300 dark:border-stone-600 rounded-lg text-sm font-medium hover:bg-stone-100 dark:hover:bg-stone-700 transition-colors"
+                className="px-3 py-1.5 border-2 border-stone-300 dark:border-stone-600 rounded-lg text-sm font-medium hover:bg-stone-100 dark:hover:bg-stone-700 transition-all"
               >
                 Later
               </button>
@@ -61,6 +60,7 @@ const PWAPrompt = () => {
           <button
             onClick={() => setShowPrompt(false)}
             className="p-1 hover:bg-stone-100 dark:hover:bg-stone-700 rounded-lg transition-colors"
+            aria-label="Close"
           >
             <XIcon className="size-4 text-stone-500" />
           </button>

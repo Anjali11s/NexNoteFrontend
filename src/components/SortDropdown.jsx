@@ -1,10 +1,11 @@
-// src/components/SortDropdown.jsx
 import { ArrowUpDownIcon } from "lucide-react";
 import { useState } from "react";
+import { isOnline } from "../lib/syncService";
 
 const SortDropdown = ({ onSort, currentSort = "newest" }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [selected, setSelected] = useState(currentSort);
+  const isOffline = !isOnline();
 
   const options = [
     { value: "newest", label: "Newest First" },
@@ -28,6 +29,7 @@ const SortDropdown = ({ onSort, currentSort = "newest" }) => {
       <button
         onClick={() => setIsOpen(!isOpen)}
         className="flex items-center gap-2 px-4 py-3 rounded-xl bg-white dark:bg-stone-800 border-2 border-amber-200 dark:border-stone-600 hover:border-amber-400 dark:hover:border-amber-500 transition-all"
+        aria-label="Sort options"
       >
         <ArrowUpDownIcon className="size-4 text-amber-600 dark:text-amber-400" />
         <span className="text-sm font-semibold text-stone-700 dark:text-stone-300 hidden sm:inline">
@@ -54,6 +56,15 @@ const SortDropdown = ({ onSort, currentSort = "newest" }) => {
             ))}
           </div>
         </>
+      )}
+      
+      {/* Offline indicator tooltip */}
+      {isOffline && (
+        <div className="absolute -bottom-6 left-0 right-0 text-center">
+          <span className="text-xs text-stone-400 dark:text-stone-500">
+            Sorting works offline
+          </span>
+        </div>
       )}
     </div>
   );

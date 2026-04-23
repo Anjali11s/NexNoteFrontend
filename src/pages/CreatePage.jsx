@@ -1,4 +1,3 @@
-// frontend/src/pages/CreatePage.jsx
 import { ArrowLeftIcon, WifiOffIcon } from "lucide-react";
 import { useState, useEffect } from "react";
 import toast from "react-hot-toast";
@@ -7,6 +6,7 @@ import Confetti from "react-confetti";
 import api from "../lib/axios";
 import TagInput from "../components/TagInput";
 import { queueAction, getCachedNotes, cacheNotes } from "../lib/offlineStorage";
+import { onOnline, onOffline, isOnline } from "../lib/syncService";
 
 const CreatePage = () => {
   const [title, setTitle] = useState("");
@@ -27,21 +27,23 @@ const CreatePage = () => {
     setCharCount(content.length);
   }, [content]);
 
-  // Listen for online/offline
+  // Use centralized event system instead of direct listeners
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
+    const unsubscribeOnline = onOnline(() => {
+      setIsOffline(false);
+    });
     
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    const unsubscribeOffline = onOffline(() => {
+      setIsOffline(true);
+    });
     
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      unsubscribeOnline();
+      unsubscribeOffline();
     };
   }, []);
 
-  // Auto-save draft (same as before)
+  // Auto-save draft
   useEffect(() => {
     const draft = localStorage.getItem("note_draft");
     if (draft && !title && !content && !tags.length) {
@@ -75,45 +77,55 @@ const CreatePage = () => {
     setLoading(true);
     
     // OFFLINE MODE: Save locally and queue for later sync
-    if (isOffline) {
-      // Create temporary note with local ID
-      const tempNote = {
-        _id: `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        title,
-        content,
-        tags,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        isPinned: false,
-        isOffline: true // Mark as offline note
-      };
-      
-      // Queue for sync when online
-      await queueAction({
-        type: 'CREATE_NOTE',
-        data: { title, content, tags }
-      });
-      
-      // Add to local cache immediately
-      const cachedNotes = await getCachedNotes();
-      cachedNotes.unshift(tempNote);
-      await cacheNotes(cachedNotes);
-      
-      // Clear draft
-      localStorage.removeItem("note_draft");
-      
-      toast.success("Note saved offline! Will sync when online.", {
-        icon: '📱',
-        duration: 4000
-      });
-      
-      navigate("/");
-      return;
-    }
+   // In CreatePage.jsx - Update the offline note creation
+
+  if (isOffline) {
+    // Generate a unique temporary ID
+    const tempId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create temporary note with local ID
+    const tempNote = {
+      _id: tempId,
+      title,
+      content,
+      tags,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      isPinned: false,
+      isOffline: true // Mark as offline note
+    };
+  
+    // Queue for sync when online
+    await queueAction({
+      type: 'CREATE_NOTE',
+      tempId: tempId,
+      data: { title, content, tags }
+    });
+  
+    // Get existing cached notes
+    const cachedNotes = await getCachedNotes();
+    
+    // Add new note to the beginning (most recent first)
+    const updatedCache = [tempNote, ...cachedNotes];
+    
+    // Save to cache
+    await cacheNotes(updatedCache);
+    
+    // Clear draft
+    localStorage.removeItem("note_draft");
+  
+    toast.success("Note saved offline! Will sync when online.", {
+      icon: '📱',
+      duration: 4000
+    });
+    
+    navigate("/");
+    return;
+  } 
     
     // ONLINE MODE: Normal flow
     try {
-      await api.post("/notes", { title, content, tags });
+      const response = await api.post("/notes", { title, content, tags });
       localStorage.removeItem("note_draft");
       setShowConfetti(true);
       setTimeout(() => setShowConfetti(false), 3000);
@@ -126,12 +138,15 @@ const CreatePage = () => {
           duration: 4000,
           icon: "💀",
         });
-      } else if (error.isOffline) {
+      } else if (error.isOffline || error.code === 'ERR_NETWORK') {
         // Fallback to offline mode if request fails due to network
         setIsOffline(true);
-        handleSubmit(e); // Retry with offline logic
+        // Retry with offline logic after a short delay
+        setTimeout(() => {
+          handleSubmit(e);
+        }, 100);
       } else {
-        toast.error("Failed to create note");
+        toast.error("Failed to create note: " + (error.response?.data?.message || error.message));
       }
     } finally {
       setLoading(false);

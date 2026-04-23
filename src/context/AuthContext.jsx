@@ -1,7 +1,7 @@
-// frontend/src/context/AuthContext.jsx
 import React, { createContext, useState, useContext, useEffect } from "react";
 import api from "../lib/axios";
 import { clearOfflineData } from "../lib/offlineStorage";
+import { isOnline } from "../lib/syncService";
 import toast from "react-hot-toast";
 
 const AuthContext = createContext();
@@ -17,8 +17,8 @@ export const AuthProvider = ({ children }) => {
     if (token) {
       api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
       
-      // CRITICAL FIX: Don't try to verify user if offline
-      if (navigator.onLine) {
+      // Don't try to verify user if offline
+      if (isOnline()) {
         fetchUser();
       } else {
         // If offline, assume token is still valid
@@ -43,7 +43,7 @@ export const AuthProvider = ({ children }) => {
     } catch (error) {
       console.error("Failed to fetch user:", error);
       // Only logout if it's not an offline error
-      if (!error.isOffline && navigator.onLine) {
+      if (!error.isOffline && isOnline()) {
         localStorage.removeItem("token");
         delete api.defaults.headers.common["Authorization"];
         localStorage.removeItem("cachedUser");

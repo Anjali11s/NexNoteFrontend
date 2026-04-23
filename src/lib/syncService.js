@@ -1,20 +1,22 @@
-// frontend/src/lib/syncService.js
 import api from './axios';
-import { getPendingActions, removePendingAction, setLastSync } from './offlineStorage';
+import { getPendingActions, removePendingAction, setLastSync, getCachedNotes, cacheNotes } from './offlineStorage';
 import toast from 'react-hot-toast';
 
-// Flag to prevent multiple simultaneous syncs
 let isSyncing = false;
+let isListenerInitialized = false;
+let onlineCallbacks = [];
+let offlineCallbacks = [];
+
+// Track mapping between offline IDs and real IDs
+const idMapping = new Map();
 
 // Process all pending actions in order
 export const syncPendingActions = async () => {
-  // CRITICAL FIX: Prevent multiple simultaneous syncs
   if (isSyncing) {
     console.log('Sync already in progress, skipping...');
     return;
   }
   
-  // Don't sync if offline
   if (!navigator.onLine) {
     console.log('Offline, skipping sync');
     return;
@@ -32,53 +34,137 @@ export const syncPendingActions = async () => {
     
     console.log(`📡 Syncing ${pendingActions.length} pending actions...`);
     
-    for (const action of pendingActions) {
+    // First, process CREATE actions to get real IDs
+    const createActions = pendingActions.filter(a => a.type === 'CREATE_NOTE');
+    const otherActions = pendingActions.filter(a => a.type !== 'CREATE_NOTE');
+    
+    // Process all CREATE actions first
+    for (const action of createActions) {
       try {
+        console.log(`📝 Creating note: "${action.data.title}"`);
+        const response = await api.post('/notes', action.data);
+        console.log(`✅ Created note with real ID: ${response.data._id}`);
+        
+        // Store the mapping from offline ID to real ID
+        idMapping.set(action.tempId, response.data._id);
+        
+        // Update local cache: replace offline note with real note
+        const cachedNotes = await getCachedNotes();
+        const updatedCache = cachedNotes.map(note => {
+          if (note._id === action.tempId) {
+            return { ...response.data, isOffline: false };
+          }
+          return note;
+        });
+        await cacheNotes(updatedCache);
+        
+        // Remove the CREATE action from queue
+        await removePendingAction(action.id);
+        
+      } catch (error) {
+        console.error(`❌ Failed to create note:`, error);
+        // Keep the action for retry
+      }
+    }
+    
+    // Now process UPDATE, DELETE, PIN actions with ID mapping
+    for (const action of otherActions) {
+      try {
+        // Check if this action uses an offline ID that now has a real mapping
+        let realId = action.noteId;
+        
+        // If the noteId is an offline ID and we have a mapping, use the real ID
+        if (action.noteId && action.noteId.startsWith('offline_') && idMapping.has(action.noteId)) {
+          realId = idMapping.get(action.noteId);
+          console.log(`🔄 Mapping offline ID ${action.noteId} to real ID ${realId}`);
+        }
+        
         switch (action.type) {
-          case 'CREATE_NOTE':
-            await api.post('/notes', action.data);
-            console.log(`✅ Synced: "${action.data.title}"`);
-            break;
-            
           case 'UPDATE_NOTE':
-            await api.put(`/notes/${action.noteId}`, action.data);
+            console.log(`📝 Updating note: ${realId}`);
+            await api.put(`/notes/${realId}`, action.data);
+            console.log(`✅ Updated note: ${realId}`);
+            
+            // Update local cache with the updated note
+            const cachedNotes = await getCachedNotes();
+            const updatedCache = cachedNotes.map(note => {
+              if (note._id === action.noteId || note._id === realId) {
+                return { ...note, ...action.data, updatedAt: new Date().toISOString(), isOffline: false };
+              }
+              return note;
+            });
+            await cacheNotes(updatedCache);
             break;
             
           case 'DELETE_NOTE':
-            await api.delete(`/notes/${action.noteId}`);
+            console.log(`🗑️ Deleting note: ${realId}`);
+            await api.delete(`/notes/${realId}`);
+            console.log(`✅ Deleted note: ${realId}`);
+            
+            // Remove from cache
+            const allNotes = await getCachedNotes();
+            const filteredNotes = allNotes.filter(n => n._id !== action.noteId && n._id !== realId);
+            await cacheNotes(filteredNotes);
             break;
             
           case 'PIN_NOTE':
-            await api.patch(`/notes/${action.noteId}/pin`, { isPinned: action.isPinned });
+            console.log(`📌 Pinning note: ${realId}`);
+            await api.patch(`/notes/${realId}/pin`, { isPinned: action.isPinned });
+            console.log(`✅ Pinned note: ${realId}`);
             break;
         }
         
-        // Remove successfully synced action
+        // Remove the action from queue
         await removePendingAction(action.id);
+        
       } catch (error) {
-        console.error(`Failed to sync action ${action.id}:`, error);
-        // Don't remove - will retry next time
+        console.error(`❌ Failed to sync action ${action.id}:`, error);
+        
+        // If it's a 404 and we have a mapping, try with the real ID
+        if (error.response?.status === 404 && action.noteId && idMapping.has(action.noteId)) {
+          console.log(`⚠️ 404 with offline ID, will retry with real ID on next sync`);
+        }
+        // Don't remove on error, will retry next time
       }
     }
     
     await setLastSync();
     console.log('✅ Sync completed!');
     
-    // Only show toast if there were actions
-    if (pendingActions.length > 0) {
-      toast.success(`Synced ${pendingActions.length} item(s)!`);
-    }
+    // Clear the ID mapping after successful sync
+    idMapping.clear();
+    
+    // Notify listeners
+    onlineCallbacks.forEach(cb => cb('sync_completed'));
+    
+    // Trigger refresh of notes
+    window.dispatchEvent(new Event('refreshNotes'));
+    
   } finally {
     isSyncing = false;
   }
 };
 
-// Flag to track if listener is already initialized
-let isListenerInitialized = false;
+// Subscribe to online/offline events
+export const onOnline = (callback) => {
+  onlineCallbacks.push(callback);
+  return () => {
+    onlineCallbacks = onlineCallbacks.filter(cb => cb !== callback);
+  };
+};
 
-// Initialize sync listener (only once!)
+export const onOffline = (callback) => {
+  offlineCallbacks.push(callback);
+  return () => {
+    offlineCallbacks = offlineCallbacks.filter(cb => cb !== callback);
+  };
+};
+
+// Get current online status
+export const isOnline = () => navigator.onLine;
+
+// Initialize sync listener (ONLY ONCE)
 export const initSyncListener = () => {
-  // CRITICAL FIX: Prevent multiple initializations
   if (isListenerInitialized) {
     console.log('Sync listener already initialized, skipping...');
     return;
@@ -87,14 +173,17 @@ export const initSyncListener = () => {
   isListenerInitialized = true;
   console.log('Initializing sync listener...');
   
-  // Listen for online event
   const handleOnline = async () => {
     console.log('🌐 Back online! Syncing...');
     toast.success('Back online! Syncing your notes...', {
       duration: 2000,
     });
+    
     await syncPendingActions();
-    // Trigger refresh of notes in UI
+    
+    // Notify all UI listeners
+    onlineCallbacks.forEach(cb => cb('online'));
+    
     window.dispatchEvent(new Event('refreshNotes'));
   };
   
@@ -104,15 +193,14 @@ export const initSyncListener = () => {
       duration: 2000,
       icon: '📱',
     });
+    
+    // Notify all UI listeners
+    offlineCallbacks.forEach(cb => cb());
   };
   
   window.addEventListener('online', handleOnline);
   window.addEventListener('offline', handleOffline);
   
-  // Don't auto-sync on load - let HomePage handle it
-  // This prevents duplicate syncs
-  
-  // Cleanup function (optional, for testing)
   return () => {
     window.removeEventListener('online', handleOnline);
     window.removeEventListener('offline', handleOffline);

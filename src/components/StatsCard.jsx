@@ -1,4 +1,3 @@
-// src/components/StatsCard.jsx
 import { FileTextIcon, CalendarIcon, TagIcon, TrendingUpIcon } from "lucide-react";
 
 const StatsCard = ({ notes }) => {
@@ -42,11 +41,11 @@ const StatsCard = ({ notes }) => {
       {stats.map((stat, index) => (
         <div
           key={index}
-          className="relative overflow-hidden bg-white dark:bg-stone-800 rounded-xl border border-amber-200 dark:border-stone-700 p-4 shadow-sm hover:shadow-md transition-all"
+          className="relative overflow-hidden bg-white dark:bg-stone-800 rounded-xl border border-amber-200 dark:border-stone-700 p-4 shadow-sm hover:shadow-md transition-all group"
         >
-          <div className={`absolute top-0 left-0 h-1 w-full bg-gradient-to-r ${stat.color}`} />
+          <div className={`absolute top-0 left-0 h-1 w-full bg-gradient-to-r ${stat.color} group-hover:h-1.5 transition-all`} />
           <div className="flex items-center gap-3">
-            <div className={`p-2 rounded-lg bg-gradient-to-br ${stat.color} bg-opacity-10`}>
+            <div className={`p-2 rounded-lg bg-gradient-to-br ${stat.color} bg-opacity-10 dark:bg-opacity-20`}>
               <stat.icon className="size-5 text-amber-600 dark:text-amber-400" />
             </div>
             <div>

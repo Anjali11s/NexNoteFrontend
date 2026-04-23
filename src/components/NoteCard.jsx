@@ -1,32 +1,32 @@
-// frontend/src/components/NoteCard.jsx
-// The issue was using useState instead of useEffect for event listeners
-
 import { PenSquareIcon, Trash2Icon, PinIcon } from "lucide-react";
 import { useNavigate } from "react-router"; 
 import { formatDate } from "../lib/utils";
 import api from "../lib/axios";
 import toast from "react-hot-toast";
-import { useState, useEffect } from "react"; // CHANGE: import useEffect
+import { useState, useEffect } from "react";
 import { queueAction, cacheNotes, getCachedNotes } from "../lib/offlineStorage";
+import { onOnline, onOffline, isOnline } from "../lib/syncService";
 
 const NoteCard = ({ note, setNotes }) => {
   const [isPinned, setIsPinned] = useState(note.isPinned || false);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
   const navigate = useNavigate();
 
-  // FIX: Use useEffect instead of useState for event listeners
+  // Use centralized event system
   useEffect(() => {
-    const handleOnline = () => setIsOffline(false);
-    const handleOffline = () => setIsOffline(true);
+    const unsubscribeOnline = onOnline(() => {
+      setIsOffline(false);
+    });
     
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
+    const unsubscribeOffline = onOffline(() => {
+      setIsOffline(true);
+    });
     
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
+      unsubscribeOnline();
+      unsubscribeOffline();
     };
-  }, []); // Empty dependency array
+  }, []);
 
   const handleDelete = async (e, id) => {
     e.preventDefault();
@@ -121,11 +121,11 @@ const NoteCard = ({ note, setNotes }) => {
   };
 
   return (
-    <div className="group block bg-white dark:bg-stone-800 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200/50 dark:border-stone-700 overflow-hidden hover:-translate-y-1 cursor-pointer">
+    <div className="group block bg-white dark:bg-stone-800 rounded-xl shadow-md hover:shadow-xl transition-all duration-300 border border-amber-200/50 dark:border-stone-700 overflow-hidden hover:-translate-y-1 cursor-pointer relative">
       <div className="h-2 bg-gradient-to-r from-amber-500 to-orange-500"></div>
       
       {note.isOffline && (
-        <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full">
+        <div className="absolute top-2 right-2 bg-yellow-500 text-white text-xs px-2 py-0.5 rounded-full z-10">
           Pending Sync
         </div>
       )}

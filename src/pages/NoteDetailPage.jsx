@@ -1,10 +1,11 @@
-// src/pages/NoteDetailPage.jsx
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import api from "../lib/axios";
 import toast from "react-hot-toast";
-import { ArrowLeftIcon, LoaderIcon, Trash2Icon, SaveIcon, Edit2Icon, EyeIcon } from "lucide-react";
+import { ArrowLeftIcon, Trash2Icon, SaveIcon, Edit2Icon, EyeIcon, WifiOffIcon } from "lucide-react";
 import TagInput from "../components/TagInput";
+import { queueAction, getCachedNotes, cacheNotes } from "../lib/offlineStorage";
+import { onOnline, onOffline, isOnline } from "../lib/syncService";
 
 const NoteDetailPage = () => {
   const [note, setNote] = useState(null);
@@ -13,21 +14,75 @@ const NoteDetailPage = () => {
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
 
   const navigate = useNavigate();
   const { id } = useParams();
 
+  // Listen for online/offline events
+  useEffect(() => {
+    const unsubscribeOnline = onOnline(() => {
+      setIsOffline(false);
+    });
+    
+    const unsubscribeOffline = onOffline(() => {
+      setIsOffline(true);
+    });
+    
+    return () => {
+      unsubscribeOnline();
+      unsubscribeOffline();
+    };
+  }, []);
+
+  // Fetch note 
   useEffect(() => {
     const fetchNote = async () => {
       try {
-        const res = await api.get(`/notes/${id}`);
-        setNote(res.data);
-        updateCounts(res.data.content);
+        // First, always check cache regardless of online status
+        const cachedNotes = await getCachedNotes();
+        const cachedNote = cachedNotes.find(n => n._id === id);
+        
+        // If we have it in cache, show it immediately
+        if (cachedNote) {
+          setNote(cachedNote);
+          updateCounts(cachedNote.content);
+          setLoading(false);
+        }
+        
+        // If online AND it's a real MongoDB ID (not offline_), try to fetch fresh
+        if (isOnline() && !id.startsWith('offline_')) {
+          try {
+            const res = await api.get(`/notes/${id}`);
+            setNote(res.data);
+            updateCounts(res.data.content);
+            
+            // Update cache with fresh data
+            const updatedCache = cachedNotes.map(n => 
+              n._id === id ? res.data : n
+            );
+            await cacheNotes(updatedCache);
+          } catch (apiError) {
+            console.log("API fetch failed, using cached version");
+          }
+        }
+        
         // Check if we're in edit mode based on URL
         setIsEditing(window.location.pathname.includes('/edit'));
       } catch (error) {
-        toast.error("Failed to fetch the note");
-        navigate("/");
+        console.error("Error fetching note:", error);
+        
+        // Last resort: try to find in cache again
+        const cachedNotes = await getCachedNotes();
+        const cachedNote = cachedNotes.find(n => n._id === id);
+        if (cachedNote) {
+          setNote(cachedNote);
+          updateCounts(cachedNote.content);
+          toast.error("Using cached version", { icon: '📱' });
+        } else {
+          toast.error("Failed to fetch the note");
+          navigate("/");
+        }
       } finally {
         setLoading(false);
       }
@@ -51,6 +106,22 @@ const NoteDetailPage = () => {
   const handleDelete = async () => {
     if (!window.confirm("Are you sure you want to delete this note?")) return;
 
+    if (isOffline) {
+      await queueAction({
+        type: 'DELETE_NOTE',
+        noteId: id
+      });
+      
+      // Update cache
+      const cached = await getCachedNotes();
+      const updatedCache = cached.filter(n => n._id !== id);
+      await cacheNotes(updatedCache);
+      
+      toast.success("Note will be deleted when back online", { icon: '📱' });
+      navigate("/");
+      return;
+    }
+
     try {
       await api.delete(`/notes/${id}`);
       toast.success("Note deleted");
@@ -67,6 +138,57 @@ const NoteDetailPage = () => {
     }
 
     setSaving(true);
+    
+    // OFFLINE MODE: Update local cache and queue the edit
+    if (isOffline) {
+      try {
+        const updatedNote = {
+          ...note,
+          updatedAt: new Date().toISOString(),
+          isOffline: true
+        };
+        
+        // Queue the update action for later sync
+        await queueAction({
+          type: 'UPDATE_NOTE',
+          noteId: id,  // This could be offline_123 or real MongoDB ID
+          data: { 
+            title: updatedNote.title, 
+            content: updatedNote.content, 
+            tags: updatedNote.tags 
+          }
+        });
+        
+        // Update local cache
+        const cachedNotes = await getCachedNotes();
+        const noteIndex = cachedNotes.findIndex(n => n._id === id);
+        
+        if (noteIndex !== -1) {
+          cachedNotes[noteIndex] = updatedNote;
+          await cacheNotes(cachedNotes);
+        } else {
+          cachedNotes.push(updatedNote);
+          await cacheNotes(cachedNotes);
+        }
+        
+        setNote(updatedNote);
+        
+        toast.success("Changes saved offline! Will sync when online.", { 
+          icon: '📱',
+          duration: 3000
+        });
+        
+        setIsEditing(false);
+      } catch (error) {
+        console.error("Error saving offline:", error);
+        toast.error("Failed to save changes offline");
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
+    
+    // ONLINE MODE: Normal flow
     try {
       await api.put(`/notes/${id}`, note);
       toast.success("Note updated successfully");
@@ -75,14 +197,21 @@ const NoteDetailPage = () => {
       const res = await api.get(`/notes/${id}`);
       setNote(res.data);
     } catch (error) {
-      toast.error("Failed to update note");
+      if (error.isOffline) {
+        setIsOffline(true);
+        setTimeout(() => {
+          handleSave();
+        }, 100);
+      } else {
+        toast.error("Failed to update note");
+      }
     } finally {
       setSaving(false);
     }
   };
 
   const toggleEdit = () => {
-    setIsEditing(!isEditing);
+    setIsEditing(true);
   };
 
   // Keyboard shortcut for save
@@ -114,6 +243,14 @@ const NoteDetailPage = () => {
     <div className="min-h-screen bg-gradient-to-br from-amber-50 via-orange-50 to-stone-100 dark:from-stone-900 dark:via-stone-800 dark:to-stone-900 transition-colors duration-300">
       <div className="container mx-auto px-4 py-8">
         <div className="max-w-3xl mx-auto">
+          {/* Offline Banner */}
+          {isOffline && (
+            <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-xl flex items-center gap-2 text-yellow-700 dark:text-yellow-400">
+              <WifiOffIcon className="size-4" />
+              <span className="text-sm">Offline mode - Changes will sync when online</span>
+            </div>
+          )}
+
           <div className="flex items-center justify-between mb-6">
             <Link to="/" className="inline-flex items-center gap-2 text-amber-700 dark:text-amber-400 hover:text-amber-900 dark:hover:text-amber-300 transition-colors group">
               <ArrowLeftIcon className="h-5 w-5 group-hover:-translate-x-1 transition-transform" />
@@ -131,7 +268,7 @@ const NoteDetailPage = () => {
               )}
               <button
                 onClick={handleDelete}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:border-red-400 transition-all font-medium"
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all font-medium"
               >
                 <Trash2Icon className="h-5 w-5" />
                 Delete Note
@@ -160,6 +297,12 @@ const NoteDetailPage = () => {
             </div>
             
             <div className="p-6">
+              {note.isOffline && !isEditing && (
+                <div className="mb-4 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg text-xs text-yellow-700 dark:text-yellow-400 text-center">
+                  ⏳ This note is pending sync and may not be saved on the server yet
+                </div>
+              )}
+              
               {isEditing ? (
                 // EDIT MODE
                 <>
@@ -216,7 +359,7 @@ const NoteDetailPage = () => {
                       onClick={handleSave}
                     >
                       <SaveIcon className="h-5 w-5" />
-                      {saving ? "Saving..." : "Save Changes"}
+                      {saving ? "Saving..." : (isOffline ? "Save Offline" : "Save Changes")}
                     </button>
                   </div>
                 </>
@@ -267,7 +410,7 @@ const NoteDetailPage = () => {
   );
 };
 
-// Add formatDate function if not imported
+// Format date function
 const formatDate = (date) => {
   return date.toLocaleDateString("en-US", {
     month: "short",

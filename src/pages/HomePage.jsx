@@ -1,5 +1,4 @@
-// frontend/src/pages/HomePage.jsx
-import { useState, useEffect, useRef } from "react"; // Add useRef
+import { useState, useEffect, useRef } from "react";
 import Navbar from "../components/Navbar";
 import RateLimitedUI from "../components/RateLimitedUI";
 import SearchBar from "../components/SearchBar";
@@ -9,9 +8,9 @@ import api from "../lib/axios";
 import toast from "react-hot-toast";
 import NoteCard from "../components/NoteCard";
 import NotesNotFound from "../components/NotesNotFound";
-import { SparklesIcon, WifiOffIcon, CloudSyncIcon } from "lucide-react";
-import { cacheNotes, getCachedNotes, getLastSync, getPendingCount } from "../lib/offlineStorage";
-import { syncPendingActions, initSyncListener } from "../lib/syncService";
+import { SparklesIcon, WifiOffIcon, CloudSyncIcon, Trash2Icon } from "lucide-react";
+import { cacheNotes, getCachedNotes, getLastSync, getPendingCount, getPendingActions, removePendingAction } from "../lib/offlineStorage";
+import { syncPendingActions, initSyncListener, onOnline, onOffline, isOnline } from "../lib/syncService";
 
 const HomePage = () => {
   const [isRateLimited, setIsRateLimited] = useState(false);
@@ -23,22 +22,64 @@ const HomePage = () => {
   const [lastSync, setLastSync] = useState(null);
   const [pendingCount, setPendingCount] = useState(0);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showClearButton, setShowClearButton] = useState(false); // For debugging
   
-  // CRITICAL FIX: Track if initial sync was done
   const initialSyncDone = useRef(false);
 
   // Initialize sync listener once when app loads
   useEffect(() => {
     initSyncListener();
+    
+    // Subscribe to online events
+    const unsubscribeOnline = onOnline((type) => {
+      setIsOffline(false);
+      if (type === 'online') {
+        fetchNotes(true);
+      } else if (type === 'sync_completed') {
+        fetchNotes(true);
+        updatePendingCount();
+      }
+    });
+    
+    const unsubscribeOffline = onOffline(() => {
+      setIsOffline(true);
+    });
+    
+    return () => {
+      unsubscribeOnline();
+      unsubscribeOffline();
+    };
   }, []);
+
+  // Update pending count function
+  const updatePendingCount = async () => {
+    const count = await getPendingCount();
+    setPendingCount(count);
+    // Show clear button only if there are stuck actions (for debugging)
+    setShowClearButton(count > 0);
+  };
+
+  // Clear stuck pending actions (for debugging)
+  const clearStuckActions = async () => {
+    if (!window.confirm(`Clear ${pendingCount} pending actions? This cannot be undone.`)) return;
+    
+    try {
+      const actions = await getPendingActions();
+      for (const action of actions) {
+        await removePendingAction(action.id);
+        console.log(`Cleared action ${action.id}`);
+      }
+      await updatePendingCount();
+      await fetchNotes(true);
+      toast.success(`Cleared ${actions.length} stuck actions`);
+    } catch (error) {
+      console.error("Error clearing actions:", error);
+      toast.error("Failed to clear actions");
+    }
+  };
 
   // Fetch pending count periodically
   useEffect(() => {
-    const updatePendingCount = async () => {
-      const count = await getPendingCount();
-      setPendingCount(count);
-    };
-    
     updatePendingCount();
     const interval = setInterval(updatePendingCount, 5000);
     return () => clearInterval(interval);
@@ -58,7 +99,7 @@ const HomePage = () => {
     }
     
     // STEP 2: If offline, don't try to fetch from server
-    if (!navigator.onLine) {
+    if (!isOnline()) {
       setLoading(false);
       return;
     }
@@ -78,6 +119,7 @@ const HomePage = () => {
       } else if (error.isOffline) {
         setIsOffline(true);
       } else {
+        console.error("Failed to load notes:", error);
         toast.error("Failed to load notes");
       }
     } finally {
@@ -89,45 +131,33 @@ const HomePage = () => {
   useEffect(() => {
     fetchNotes();
     
-    // CRITICAL FIX: Only sync once on initial load
+    // Only sync once on initial load
     const doInitialSync = async () => {
-      if (!initialSyncDone.current && navigator.onLine) {
+      if (!initialSyncDone.current && isOnline()) {
         initialSyncDone.current = true;
         await syncPendingActions();
         await fetchNotes(true);
+        await updatePendingCount();
       }
     };
     
     doInitialSync();
     
-    // Listen for online/offline events
-    const handleOnline = () => {
-      setIsOffline(false);
-      fetchNotes(true);
-    };
-    
-    const handleOffline = () => {
-      setIsOffline(true);
-    };
-    
+    // Listen for refresh event
     const handleRefresh = () => {
       fetchNotes(true);
     };
     
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
     window.addEventListener('refreshNotes', handleRefresh);
     
     return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
       window.removeEventListener('refreshNotes', handleRefresh);
     };
   }, []);
 
   // Manual sync button handler
   const handleManualSync = async () => {
-    if (!navigator.onLine) {
+    if (!isOnline()) {
       toast.error("Cannot sync while offline");
       return;
     }
@@ -138,15 +168,22 @@ const HomePage = () => {
     }
     
     setIsSyncing(true);
-    await syncPendingActions();
-    await fetchNotes(true);
-    setIsSyncing(false);
+    toast.loading("Syncing...", { id: "sync" });
     
-    const count = await getPendingCount();
-    setPendingCount(count);
+    try {
+      await syncPendingActions();
+      await fetchNotes(true);
+      await updatePendingCount();
+      toast.success("Sync completed successfully!", { id: "sync" });
+    } catch (error) {
+      console.error("Sync error:", error);
+      toast.error("Sync failed. Some actions may need retry.", { id: "sync" });
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
-  // Filter and sort notes (same as before)
+  // Filter and sort notes
   const filteredNotes = notes.filter(note => 
     note.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     note.content?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -227,14 +264,27 @@ const HomePage = () => {
                 </span>
               )}
             </div>
-            <button
-              onClick={handleManualSync}
-              disabled={isSyncing || !navigator.onLine}
-              className="flex items-center gap-1 hover:text-amber-600 transition-colors"
-            >
-              <CloudSyncIcon className={`size-3 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>{isSyncing ? 'Syncing...' : 'Sync now'}</span>
-            </button>
+            <div className="flex items-center gap-2">
+              {/* Debug: Clear stuck actions button */}
+              {showClearButton && (
+                <button
+                  onClick={clearStuckActions}
+                  className="flex items-center gap-1 text-red-500 hover:text-red-700 transition-colors mr-2"
+                  title="Clear stuck pending actions (debug)"
+                >
+                  <Trash2Icon className="size-3" />
+                  <span>Clear pending</span>
+                </button>
+              )}
+              <button
+                onClick={handleManualSync}
+                disabled={isSyncing || !isOnline()}
+                className="flex items-center gap-1 hover:text-amber-600 transition-colors disabled:opacity-50"
+              >
+                <CloudSyncIcon className={`size-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                <span>{isSyncing ? 'Syncing...' : 'Sync now'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
